@@ -14,18 +14,34 @@ from datetime import datetime
 from collections import defaultdict
 import platform
 import subprocess
+from typing import Any
 
-# Third-party imports (install with pip install -r requirements.txt)
+# Third-party imports (optional, depending on mode/features)
+_MISSING_DEPS = []
 try:
     from scapy.all import Dot11, Dot11Beacon, Dot11ProbeReq, Dot11Elt, sniff, RadioTap
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    import numpy as np
-    from colorama import init, Fore, Style
 except ImportError as e:
-    print(f"Missing dependencies: {e}")
-    print("Install with: pip install scapy matplotlib pandas numpy colorama")
-    sys.exit(1)
+    Dot11 = Dot11Beacon = Dot11ProbeReq = Dot11Elt = RadioTap = None
+    sniff = None
+    _MISSING_DEPS.append(str(e))
+
+try:
+    import matplotlib.pyplot as plt
+except ImportError as e:
+    plt = None
+    _MISSING_DEPS.append(str(e))
+
+try:
+    from colorama import init, Fore, Style
+except ImportError:
+    def init(*_args, **_kwargs):
+        return None
+
+    class _Plain:
+        CYAN = GREEN = BLUE = YELLOW = RED = ""
+        RESET_ALL = BRIGHT = ""
+
+    Fore = Style = _Plain()
 
 # Initialize colorama
 init(autoreset=True)
@@ -33,10 +49,10 @@ init(autoreset=True)
 # ASCII Art and Branding
 WAVESWEEP_ASCII = f"""
 {Fore.CYAN}__        __              ____                         
-{Fore.CYAN}\ \      / /_ ___   _____/ ___|_      _____  ___ _ __  
-{Fore.CYAN} \ \ /\ / / _` \ \ / / _ \___ \ \ /\ / / _ \/ _ \ '_ \ 
-{Fore.CYAN}  \ V  V / (_| |\ V /  __/___) \ V  V /  __/  __/ |_) |
-{Fore.CYAN}   \_/\_/ \__,_| \_/ \___|____/ \_/\_/ \___|\___| .__/ 
+{Fore.CYAN}\\ \\      / /_ ___   _____/ ___|_      _____  ___ _ __  
+{Fore.CYAN} \\ \\ /\\ / / _` \\ \\ / / _ \\___ \\ \\ /\\ / / _ \\/ _ \\ '_ \\ 
+{Fore.CYAN}  \\ V  V / (_| |\\ V /  __/___) \\ V  V /  __/  __/ |_) |
+{Fore.CYAN}   \\_/\\_/ \\__,_| \\_/ \\___|____/ \\_/\\_/ \\___|\\___| .__/ 
 {Fore.CYAN}                                                |_|    
 {Style.RESET_ALL}{Fore.YELLOW}Offline Wireless Security Auditing Toolkit{Style.RESET_ALL}
 """
@@ -82,10 +98,11 @@ def get_windows_wifi_info():
 
 class WaveSweep:
     def __init__(self):
-        self.aps = defaultdict(dict)
-        self.rogue_aps = {}
-        self.vulnerabilities = {}
+        self.aps: dict[str, dict[str, Any]] = defaultdict(dict)
+        self.rogue_aps: dict[str, dict[str, Any]] = {}
+        self.vulnerabilities: dict[str, list[str]] = {}
         self.scan_time = None
+        self.scan_duration = SCAN_DURATION
         self.baseline = self.load_baseline()
         self.connected_wifi = get_windows_wifi_info() if WINDOWS_WARNING else {}
 
@@ -94,6 +111,9 @@ class WaveSweep:
         print(WAVESWEEP_ASCII)
         print(f"{Fore.GREEN}[*] Starting WaveSweep at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{Style.RESET_ALL}")
         print(f"{Fore.BLUE}[-] Operating in offline mode - No cloud dependencies{Style.RESET_ALL}\n")
+        if _MISSING_DEPS:
+            print(f"{Fore.YELLOW}[!] Optional dependencies missing: {len(_MISSING_DEPS)} module(s).{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}[!] Live capture/visualization features may be limited until dependencies are installed.{Style.RESET_ALL}\n")
         if WINDOWS_WARNING:
             print(f"{Fore.YELLOW}[!] WARNING: Monitor mode is not supported on most Windows systems.{Style.RESET_ALL}")
             print(f"{Fore.YELLOW}[!] You may only see packets for the network you are connected to.{Style.RESET_ALL}")
@@ -180,13 +200,30 @@ class WaveSweep:
     
     def scan_networks(self, interface, duration):
         """Perform wireless scan"""
+        if sniff is None:
+            raise RuntimeError(
+                "scapy is required for live capture. Install dependencies: pip install -r requirements.txt"
+            )
         print(f"\n{Fore.CYAN}[*] Scanning on {interface} for {duration} seconds...{Style.RESET_ALL}")
         self.scan_time = datetime.now()
+        self.scan_duration = duration
         if WINDOWS_WARNING:
             print(f"{Fore.YELLOW}[!] On Windows, only packets for the connected network may be visible.{Style.RESET_ALL}")
             print(f"{Fore.YELLOW}[!] Make sure you run this script as Administrator and have Npcap installed.{Style.RESET_ALL}")
         sniff(iface=interface, prn=self.packet_handler, timeout=duration)
         print(f"{Fore.GREEN}[+] Found {len(self.aps)} wireless entities (APs + clients){Style.RESET_ALL}")
+
+    def load_scan_data(self, input_path: str) -> None:
+        """Load pre-captured AP/client data from JSON for offline analysis/testing."""
+        with open(input_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if not isinstance(payload, dict):
+            raise ValueError("Input scan JSON must be an object.")
+        aps = payload.get("aps", {})
+        if not isinstance(aps, dict):
+            raise ValueError("Input scan JSON must include an object field `aps`.")
+        self.aps = aps
+        self.scan_time = datetime.now()
     
     def detect_vulnerabilities(self):
         """Identify security vulnerabilities"""
@@ -290,8 +327,24 @@ class WaveSweep:
             self.generate_text_report(filename)
         elif format == "html":
             self.generate_html_report(filename)
+        elif format == "json":
+            self.generate_json_report(filename)
         
         print(f"{Fore.GREEN}[+] Report generated: {os.path.join(REPORT_DIR, filename)}.{format}{Style.RESET_ALL}")
+
+    def _security_posture(self) -> dict[str, Any]:
+        total_aps = len([ap for ap in self.aps.values() if ap["Type"] == "AP"])
+        vuln_aps = len(self.vulnerabilities)
+        rogue_count = len(self.rogue_aps)
+        penalty = (vuln_aps * 15) + (rogue_count * 20)
+        score = max(0, 100 - penalty)
+        return {
+            "score": score,
+            "total_aps": total_aps,
+            "vulnerable_aps": vuln_aps,
+            "rogue_aps": rogue_count,
+            "status": "at_risk" if score < 70 else "acceptable",
+        }
     
     def generate_text_report(self, filename):
         """Generate plain text report (no ANSI colors)"""
@@ -300,10 +353,10 @@ class WaveSweep:
         # ASCII art for "WaveSweep"
         ascii_art = (
             "__        __              ____                             \n"
-            "\ \      / /_ ___   _____/ ___|_      _____  ___ _ __      \n"
-            " \ \ /\ / / _` \ \ / / _ \___ \ \ /\ / / _ \/ _ \ '_ \     \n"
-            "  \ V  V / (_| |\ V /  __/___) \ V  V /  __/  __/ |_) |    \n"
-            "   \_/\_/ \__,_| \_/ \___|____/ \_/\_/ \___|\___| .__/     \n"
+            "\\ \\      / /_ ___   _____/ ___|_      _____  ___ _ __      \n"
+            " \\ \\ /\\ / / _` \\ \\ / / _ \\___ \\ \\ /\\ / / _ \\/ _ \\ '_ \\     \n"
+            "  \\ V  V / (_| |\\ V /  __/___) \\ V  V /  __/  __/ |_) |    \n"
+            "   \\_/\\_/ \\__,_| \\_/ \\___|____/ \\_/\\_/ \\___|\\___| .__/     \n"
             "                                                |_|        \n"
             "Offline Wireless Security Auditing Toolkit\n"
         )
@@ -312,7 +365,9 @@ class WaveSweep:
             f.write(ascii_art)
             f.write("WaveSweep Security Report\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Scan Duration: {SCAN_DURATION} seconds\n")
+            f.write(f"Scan Duration: {self.scan_duration} seconds\n")
+            posture = self._security_posture()
+            f.write(f"Security Score: {posture['score']}/100 ({posture['status']})\n")
             # Add connected Wi-Fi info if available
             if self.connected_wifi:
                 f.write("\n=== Connected Wi-Fi Info ===\n")
@@ -385,7 +440,9 @@ class WaveSweep:
             
             f.write(f"<h1>WaveSweep Security Report</h1>")
             f.write(f"<p><strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>")
-            f.write(f"<p><strong>Scan Duration:</strong> {SCAN_DURATION} seconds</p>")
+            f.write(f"<p><strong>Scan Duration:</strong> {self.scan_duration} seconds</p>")
+            posture = self._security_posture()
+            f.write(f"<p><strong>Security Score:</strong> {posture['score']}/100 ({posture['status']})</p>")
             
             # Summary card
             f.write(f"<div class='summary-card'>")
@@ -427,9 +484,29 @@ class WaveSweep:
             f.write(f"<p>{len(self.baseline)} trusted APs in baseline</p>")
             
             f.write("</body></html>")
+
+    def generate_json_report(self, filename):
+        """Generate machine-readable JSON report"""
+        report_path = os.path.join(REPORT_DIR, filename + ".json")
+        posture = self._security_posture()
+        payload = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "scan_duration": self.scan_duration,
+            "security_posture": posture,
+            "aps": self.aps,
+            "vulnerabilities": self.vulnerabilities,
+            "rogue_aps": self.rogue_aps,
+            "baseline_size": len(self.baseline),
+            "connected_wifi": self.connected_wifi,
+        }
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
     
     def visualize_network(self):
         """Create network visualization"""
+        if plt is None:
+            print(f"{Fore.YELLOW}[!] matplotlib is required for visualization (pip install matplotlib){Style.RESET_ALL}")
+            return
         if not self.aps:
             print(f"{Fore.YELLOW}[!] No data to visualize{Style.RESET_ALL}")
             return
@@ -475,7 +552,9 @@ class WaveSweep:
         """Print scan summary to console"""
         print(f"\n{Fore.CYAN}{Style.BRIGHT}=== Scan Summary ==={Style.RESET_ALL}")
         print(f"Scan Time: {self.scan_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Duration: {SCAN_DURATION} seconds")
+        print(f"Duration: {self.scan_duration} seconds")
+        posture = self._security_posture()
+        print(f"Security Score: {posture['score']}/100 ({posture['status']})")
         print(f"APs Detected: {len([ap for ap in self.aps.values() if ap['Type'] == 'AP'])}")
         print(f"Clients Detected: {len([ap for ap in self.aps.values() if ap['Type'] == 'Client'])}")
         
@@ -505,20 +584,25 @@ def main():
                         help="Wireless interface in monitor mode")
     parser.add_argument("-d", "--duration", type=int, default=SCAN_DURATION,
                         help="Scan duration in seconds")
-    parser.add_argument("-r", "--report", choices=["text", "html"], default="text",
+    parser.add_argument("-r", "--report", choices=["text", "html", "json"], default="text",
                         help="Report format")
     parser.add_argument("-v", "--visualize", action="store_true",
                         help="Generate network visualization")
     parser.add_argument("-u", "--update-baseline", action="store_true",
                         help="Update AP baseline with current scan")
+    parser.add_argument("--input-scan", default=None, help="Optional JSON input with pre-captured AP data.")
     args = parser.parse_args()
 
     # Initialize WaveSweep
     auditor = WaveSweep()
     auditor.display_banner()
 
-    # Perform scan
-    auditor.scan_networks(args.interface, args.duration)
+    # Perform scan or load pre-captured data
+    if args.input_scan:
+        auditor.load_scan_data(args.input_scan)
+        print(f"{Fore.GREEN}[+] Loaded input scan data from {args.input_scan}{Style.RESET_ALL}")
+    else:
+        auditor.scan_networks(args.interface, args.duration)
     
     # Analyze networks
     auditor.detect_vulnerabilities()

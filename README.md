@@ -30,8 +30,8 @@ WaveSweep is a Python-based wireless security auditing tool that operates 100% o
 
 1. **Clone the repository:**
     ```bash
-    git clone https://github.com/geddzzy/wavesweep.git
-    cd wavesweep
+    git clone https://github.com/gerardvincelillo/wave-sweep.git
+    cd wave-sweep
     ```
 
 2. **Install dependencies:**
@@ -61,13 +61,19 @@ python wavesweep.py [options]
 ### Options:
 - `-i INTERFACE` : Wireless interface (default: wlan0mon on Linux, Wi-Fi on Windows)
 - `-d DURATION`  : Scan duration in seconds (default: 30)
-- `-r {text,html}` : Report format (default: text)
+- `-r {text,html,json}` : Report format (default: text)
 - `-v`           : Generate network visualization (Linux only)
 - `-u`           : Update AP baseline with current scan
+- `--input-scan <file>` : Analyze pre-captured AP JSON data instead of live sniffing
 
 ### Example:
 ```bash
 sudo python wavesweep.py -i wlan0mon -d 45 -r html -v -u
+```
+
+Offline replay mode (no live capture required):
+```bash
+python wavesweep.py --input-scan samples/scan.json -r json
 ```
 
 ---
