@@ -126,6 +126,6 @@ All rights reserved.
 ## Docs
 
 - `docs/README.md`: docs index for the repository
-- `docs/IMPLEMENTATION-CHECKLIST.md`
-- `docs/PROJECT-VISION.md`
-- `docs/STACK-INVENTORY.md`
+- `docs/implementation_checklist.md`
+- `docs/project_vision.md`
+- `docs/stack_inventory.md`
