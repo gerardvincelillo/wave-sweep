@@ -12,8 +12,6 @@ except ModuleNotFoundError:  # pragma: no cover
     tomllib = None
 
 REPO_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-LOWER_TOKEN_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
-LOWER_FILE_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*(?:\.[a-z0-9]+(?:[-_][a-z0-9]+)*)*$")
 CLI_NAME_RE = re.compile(r"^[a-z0-9]+$")
 MODULE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -87,6 +85,16 @@ IGNORED_EXTENSIONS = {
     ".mov",
 }
 
+TOKEN_RE = re.compile(r"^[a-z0-9_][a-z0-9_-]*$")
+
+
+def is_lower_token(value: str) -> bool:
+    return bool(TOKEN_RE.fullmatch(value))
+
+
+def is_lower_file_name(name: str) -> bool:
+    return all(is_lower_token(part) for part in name.split("."))
+
 
 def working_paths() -> list[Path]:
     out: list[Path] = []
@@ -143,7 +151,7 @@ def main() -> int:
             if part.startswith(".") or part in IGNORED_DIRS or part.endswith(IGNORED_SUFFIXES):
                 skip = True
                 break
-            if not LOWER_TOKEN_RE.fullmatch(part):
+            if not is_lower_token(part):
                 violations.append(f"directory not lowercase snake_case or kebab-case: {rel}")
                 skip = True
                 break
@@ -155,7 +163,7 @@ def main() -> int:
             continue
         if Path(name).suffix.lower() in IGNORED_EXTENSIONS:
             continue
-        if not LOWER_FILE_RE.fullmatch(name):
+        if not is_lower_file_name(name):
             violations.append(f"file not lowercase snake_case or kebab-case: {rel}")
 
     local_modules = discover_local_modules(paths)
