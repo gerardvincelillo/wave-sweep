@@ -122,3 +122,10 @@ This project is licensed under the MIT License.
 **Copyright ©** 2025 geddzzy
 
 All rights reserved.
+
+## Docs
+
+- `docs/README.md`: docs index for the repository
+- `docs/IMPLEMENTATION-CHECKLIST.md`
+- `docs/PROJECT-VISION.md`
+- `docs/STACK-INVENTORY.md`
